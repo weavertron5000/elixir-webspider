@@ -5,15 +5,25 @@ defmodule Spider.OutgoingAgent do
     Agent.start_link(fn -> [] end, name: Spider.OutgoingAgent)
   end
 
-  def add_data_to_queue(data) do
-    Agent.update(Spider.OutgoingAgent, fn state -> state ++ [data] end)
+  def add_data_to_queue(project, data) do
+    Agent.update(Spider.OutgoingAgent, fn state -> state ++ [{ project, data }] end)
   end
 
-  def get_all_items_in_queue() do
-    Agent.get(Spider.OutgoingAgent, fn state -> state end)
+  def get_all_items_in_queue(project) do
+    Agent.get(Spider.OutgoingAgent, fn state ->
+      Enum.filter(state, fn item ->
+        { p, _ } = item
+        project == p
+      end)
+    end)
   end
 
-  def clear() do
-    Agent.update(Spider.OutgoingAgent, fn state -> [] end)
+  def clear(project) do
+    Agent.update(Spider.OutgoingAgent, fn state ->
+      Enum.filter(state, fn item ->
+        { p, _ } = item
+        project != p
+      end)
+    end)
   end
 end

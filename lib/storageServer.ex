@@ -18,35 +18,39 @@ defmodule Spider.StorageServer do
   def handle_info(:tick, state) do
     { redis } = state
 
-    queued = Spider.QueueAgent.get_currently_queued()
+    {:ok, projects} = Redix.command(redis, ["SMEMBERS", "projects"])
 
-    {:ok, _} = Redix.command(redis, ["SET", "queued", Jason.encode!(queued)])
+    Enum.each(projects, fn project ->
+      queued = Spider.QueueAgent.get_currently_queued(project)
 
-    {:ok, commands} = Redix.command(redis, ["SMEMBERS", "commands"])
+      {:ok, _} = Redix.command(redis, ["SET", project <> "queued", Jason.encode!(queued)])
 
-    case commands do
-      nil -> Spider.CommandAgent.set_data([])
-      _ -> Spider.CommandAgent.set_data(commands)
-    end
+      {:ok, commands} = Redix.command(redis, ["SMEMBERS", project <> ":commands"])
 
-    {:ok, sites} = Redix.command(redis, ["SMEMBERS", "sites"])
+      case commands do
+        nil -> Spider.CommandAgent.set_data(project, [])
+        _ -> Spider.CommandAgent.set_data(project, commands)
+      end
 
-    case sites do
-      nil -> :ok
-      _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue(x) end)
-    end
+      {:ok, sites} = Redix.command(redis, ["SMEMBERS", project <> "sites"])
 
-    {:ok, _} = Redix.command(redis, ["DEL", "sites"])
+      case sites do
+        nil -> :ok
+        _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x }) end)
+      end
 
-    Enum.each(Spider.OutgoingAgent.get_all_items_in_queue(), fn x ->
-      %{ "url" => url, "data" => _ } = x
+      {:ok, _} = Redix.command(redis, ["DEL", project <> "sites"])
 
-      {:ok, _} = Redix.command(redis, ["SADD", url, Jason.encode!(x)])
+      Enum.each(Spider.OutgoingAgent.get_all_items_in_queue(project), fn x ->
+        %{ "url" => url, "data" => _ } = x
 
-      {:ok, _} = Redix.command(redis, ["SADD", "crawled", url])
+        {:ok, _} = Redix.command(redis, ["SADD", project <> url, Jason.encode!(x)])
+
+        {:ok, _} = Redix.command(redis, ["SADD", project <> "crawled", url])
+      end)
+
+      Spider.OutgoingAgent.clear(project)
     end)
-
-    Spider.OutgoingAgent.clear()
 
     schedule_next()
 
