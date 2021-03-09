@@ -18,6 +18,23 @@ defmodule Spider.QueryServer do
     Spider.QueueAgent.add_url_to_queue(url)
   end
 
+  defp extract_text(text) do
+    commands = Spider.CommandAgent.get_all_items()
+
+    regexCommands = Enum.filter(commands, fn command ->
+      cond do
+        command =~ ~r/^regex:/i -> true
+        true -> false
+      end
+    end)
+
+    strippedCommands = Enum.map(regexCommands, fn command ->
+      Regex.compile(String.slice(command, 6, String.length(command) - 6), "i") |> elem(1)
+    end)
+
+    Enum.reduce(strippedCommands, %{}, &Map.merge(Regex.named_captures(&1, text), &2))
+  end
+
   defp parse_body(url, body, state) do
 
     IO.puts("Processing " <> url)
@@ -66,7 +83,7 @@ defmodule Spider.QueryServer do
         end
       end)
       %{ "alt" => cond do
-        is_binary(title) -> title
+        is_binary(alt) -> alt
         true -> ""
       end, "src" => href }
     end)
@@ -121,11 +138,13 @@ defmodule Spider.QueryServer do
 
     title = Floki.text(Floki.find(document, "title"))
 
-    wordCount = Floki.find(document, "body") |> Floki.text() |> String.downcase() |> String.split() |> length()
+    allText = Floki.find(document, "body") |> Floki.text()
+
+    wordCount = allText |> String.downcase() |> String.split() |> length()
 
     timestamp = DateTime.now("Etc/UTC") |> elem(1) |> DateTime.to_iso8601
 
-    %{ "canonical_url" => canonical_url, "images" => images, "links" => links, "title" => title, "h1s" => h1s, "h2s" => h2s, "h3s" => h3s, "hash" => String.downcase(Base.encode16(:crypto.hash(:sha256,body))), "timestamp" => timestamp, "word_count" => wordCount }
+    %{ "canonical_url" => canonical_url, "extracted_text" => extract_text(allText), "images" => images, "links" => links, "title" => title, "h1s" => h1s, "h2s" => h2s, "h3s" => h3s, "hash" => String.downcase(Base.encode16(:crypto.hash(:sha256,body))), "timestamp" => timestamp, "word_count" => wordCount }
   end
 
   defp should_see(url, state) do
@@ -169,7 +188,7 @@ defmodule Spider.QueryServer do
         "url" => url,
         "data" => %{
           "status_code" => statusCode,
-          "body" => %{ "canonical_url" => "", "images" => [], "links" => [], "title" => "", "h1s" => [], "h2s" => [], "h3s" => [], "hash" => "", "timestamp" => timestamp, "word_count" => 0 },
+          "body" => %{ "canonical_url" => "", "extracted_text" => [], "images" => [], "links" => [], "title" => "", "h1s" => [], "h2s" => [], "h3s" => [], "hash" => "", "timestamp" => timestamp, "word_count" => 0 },
           "headers" => extract_headers(headers)
         }
       })
