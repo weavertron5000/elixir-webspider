@@ -18,8 +18,13 @@ defmodule Spider.QueryServer do
     Spider.QueueAgent.add_url_to_queue({ project, url })
   end
 
+  defp get_all_commands(project) do
+    { _, commands } = Spider.CommandAgent.get_all_items(project)
+    commands
+  end
+
   defp extract_text(project, url, document) do
-    commands = Spider.CommandAgent.get_all_items(project)
+    commands = get_all_commands(project)
 
     regexCommands = Enum.filter(commands, fn command ->
       cond do
@@ -49,38 +54,50 @@ defmodule Spider.QueryServer do
     end)
   end
 
+  defp extract_link(project, state, link) do
+    { _, attrs, children } = link
+    title = cond do
+      length(children) == 0 -> ""
+      true -> hd(children)
+    end
+    [{ "href", href }] = Enum.filter(attrs, fn x ->
+      { name, _ } = x
+      case name do
+        "href" -> true
+        _ -> false
+      end
+    end)
+    %URI{host: hrefHost} = URI.parse(href)
+    cond do
+      hrefHost == nil -> :ok
+      String.downcase(hrefHost) == String.downcase(host) and should_see(project, href, state) -> add_url(project, href)
+      true -> :ok
+    end
+    %{ "title" => cond do
+      is_binary(title) -> title
+      true -> ""
+    end, "href" => href }
+  end
+
   defp parse_body(project, url, body, state) do
 
     IO.puts("Processing " <> url)
 
     %URI{host: host} = URI.parse(url)
+
     {:ok, document} = Floki.parse_document(body)
+
     links = Enum.map(Floki.find(document, "a[href]"), fn link ->
-      { _, attrs, children } = link
-      title = cond do
-        length(children) == 0 -> ""
-        true -> hd(children)
-      end
-      [{ "href", href }] = Enum.filter(attrs, fn x ->
-        { name, _ } = x
-        case name do
-          "href" -> true
-          _ -> false
-        end
-      end)
-      %URI{host: hrefHost} = URI.parse(href)
-      cond do
-        hrefHost == nil -> :ok
-        String.downcase(hrefHost) == String.downcase(host) and should_see(project, href, state) -> add_url(project, href)
-        true -> :ok
-      end
-      %{ "title" => cond do
-        is_binary(title) -> title
-        true -> ""
-      end, "href" => href }
+      extract_link(project, state, link)
     end)
 
-    images = Enum.map(Floki.find(document, "img[src]"), fn image ->
+    contextual_links = Enum.uniq(Enum.map(Floki.find(document, "article a[href]"), fn link ->
+      extract_link(project, state, link)
+    end) ++ Enum.map(Floki.find(document, "p a[href]"), fn link ->
+      extract_link(project, state, link)
+    end))
+
+    images = Enum.uniq(Enum.map(Floki.find(document, "img[src]"), fn image ->
       { _, attrs, _ } = image
       [{ "src", href }] = Enum.filter(attrs, fn x ->
         { name, _ } = x
@@ -104,7 +121,7 @@ defmodule Spider.QueryServer do
         is_binary(alt) -> alt
         true -> ""
       end, "src" => href }
-    end)
+    end))
 
     h1s = Enum.map(Floki.find(document, "h1"), fn h1 ->
       { _, _, children } = h1
@@ -142,7 +159,7 @@ defmodule Spider.QueryServer do
       end }
     end)
 
-    [canonical_url | _] = Enum.map(Floki.find(document, "link[rel='canonical']"), fn link ->
+    canonical_urls = Enum.map(Floki.find(document, "link[rel='canonical']"), fn link ->
       { _, attrs, _ } = link
       hrefAttrs = Enum.filter(attrs, fn x ->
         { name, _ } = x
@@ -158,6 +175,11 @@ defmodule Spider.QueryServer do
       href
     end)
 
+    [canonical_url | _] = cond do
+      length(canonical_urls) > 0 -> canonical_urls
+      true -> [""]
+    end
+
     title = Floki.text(Floki.find(document, "title"))
 
     allText = Floki.find(document, "body") |> Floki.text()
@@ -166,7 +188,7 @@ defmodule Spider.QueryServer do
 
     timestamp = DateTime.now("Etc/UTC") |> elem(1) |> DateTime.to_iso8601
 
-    %{ "canonical_url" => canonical_url, "extracted_text" => extract_text(project, url, document), "images" => images, "links" => links, "title" => title, "h1s" => h1s, "h2s" => h2s, "h3s" => h3s, "hash" => String.downcase(Base.encode16(:crypto.hash(:sha256,body))), "timestamp" => timestamp, "word_count" => wordCount }
+    %{ "canonical_url" => canonical_url, "extracted_text" => extract_text(project, url, document), "images" => images, "contextual_links" => contextual_links, "links" => links, "title" => title, "h1s" => h1s, "h2s" => h2s, "h3s" => h3s, "hash" => String.downcase(Base.encode16(:crypto.hash(:sha256,body))), "timestamp" => timestamp, "word_count" => wordCount }
   end
 
   defp should_see_internal(project, url, state) do
@@ -199,9 +221,8 @@ defmodule Spider.QueryServer do
   end
 
   defp should_see(project, url, state) do
-    commands = Spider.CommandAgent.get_all_items(project)
+    commands = get_all_commands(project)
 
-    IO.puts(Kernel.inspect(commands))
     inclusionCommands = Enum.filter(commands, fn command ->
       cond do
         command =~ ~r/^include:/i -> true
@@ -318,7 +339,7 @@ defmodule Spider.QueryServer do
   def process_control_flow_cmds(state, urlData) do
     { project, url } = urlData
 
-    commands = Spider.CommandAgent.get_all_items(project)
+    commands = get_all_commands(project)
 
     newState = cond do
       Enum.any?(commands, fn x -> x == "halt" end) -> state

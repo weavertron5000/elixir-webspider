@@ -23,6 +23,7 @@ defmodule Spider.StorageServer do
     Enum.each(projects, fn project ->
       queued = Spider.QueueAgent.get_currently_queued(project)
 
+      # TODO: this is actually a list of tuples. We need to iterate over each tuple and convert it to a list
       queued = cond do
         not is_tuple(queued) -> {}
         true -> queued

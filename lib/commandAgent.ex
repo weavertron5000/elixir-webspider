@@ -24,8 +24,10 @@ defmodule Spider.CommandAgent do
         { p, _ } = item
         project == p
       end)
-      [{ _, items}] = filtered
-      items
+      cond do
+        length(filtered) > 0 -> hd(filtered)
+        true -> { project, [] }
+      end
     end)
   end
 end
