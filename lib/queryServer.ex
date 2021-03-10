@@ -89,13 +89,17 @@ defmodule Spider.QueryServer do
           _ -> false
         end
       end)
-      [{ "alt", alt }] = Enum.filter(attrs, fn x ->
+      altAttrs = Enum.filter(attrs, fn x ->
         { name, _ } = x
         case name do
           "alt" -> true
           _ -> false
         end
       end)
+      [{ "alt", alt }] = cond do
+        length(altAttrs) > 0 -> altAttrs
+        true -> [{"alt", ""}]
+      end
       %{ "alt" => cond do
         is_binary(alt) -> alt
         true -> ""
@@ -140,13 +144,17 @@ defmodule Spider.QueryServer do
 
     [canonical_url | _] = Enum.map(Floki.find(document, "link[rel='canonical']"), fn link ->
       { _, attrs, _ } = link
-      [{ "href", href }] = Enum.filter(attrs, fn x ->
+      hrefAttrs = Enum.filter(attrs, fn x ->
         { name, _ } = x
         case name do
           "href" -> true
           _ -> false
         end
       end)
+      [{ "href", href }] = cond do
+        length(hrefAttrs) > 0 -> hrefAttrs
+        true -> [{"href", ""}]
+      end
       href
     end)
 
@@ -193,6 +201,7 @@ defmodule Spider.QueryServer do
   defp should_see(project, url, state) do
     commands = Spider.CommandAgent.get_all_items(project)
 
+    IO.puts(Kernel.inspect(commands))
     inclusionCommands = Enum.filter(commands, fn command ->
       cond do
         command =~ ~r/^include:/i -> true
@@ -259,14 +268,14 @@ defmodule Spider.QueryServer do
   end
 
   defp extract_headers(headers) do
-    Enum.filter(headers, fn header ->
+    Enum.map(Enum.filter(headers, fn header ->
       cond do
         elem(header, 0) =~ ~r/last-modified/i -> true
         elem(header, 0) =~ ~r/content-type/i -> true
         elem(header, 0) =~ ~r/content-length/i -> true
         true -> false
       end
-    end)
+    end), fn tuple -> Tuple.to_list(tuple) end)
   end
 
   defp tick(state, project, url) do
@@ -275,7 +284,7 @@ defmodule Spider.QueryServer do
     %{ ^project => seen } = Map.merge(Map.put(%{}, project, []), projectSeen)
 
     response = case url do
-      url when url != "" -> {:ok, %{ "url" => url, "response" => HTTPoison.get(url, ["User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"]) } }
+      url when url != "" -> {:ok, %{ "url" => url, "response" => HTTPoison.get!(url, ["User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"]) } }
       _ -> {:no_url}
     end
 
@@ -290,7 +299,7 @@ defmodule Spider.QueryServer do
         add_redirect(project, url, 301, headers)
       {:ok, %{ "url" => _, "response" => %HTTPoison.Response{status_code: 302, headers: headers}}} ->
         add_redirect(project, url, 302, headers)
-      {:ok, %{ "url" => url, "response" => %HTTPoison.Response{body: body, status_code: status_code, headers: headers}}} ->
+      {:ok, %{ "url" => _, "response" => %HTTPoison.Response{body: body, status_code: status_code, headers: headers}}} ->
         Spider.OutgoingAgent.add_data_to_queue(project,
           %{
             "url" => url,
@@ -306,10 +315,7 @@ defmodule Spider.QueryServer do
     newState
   end
 
-  @impl true
-  def handle_info(:tick, state) do
-    urlData = Spider.QueueAgent.peek_next_in_queue()
-
+  def process_control_flow_cmds(state, urlData) do
     { project, url } = urlData
 
     commands = Spider.CommandAgent.get_all_items(project)
@@ -322,6 +328,16 @@ defmodule Spider.QueryServer do
     schedule_next()
 
     {:noreply, newState}
+  end
+
+  @impl true
+  def handle_info(:tick, state) do
+    urlData = Spider.QueueAgent.peek_next_in_queue()
+
+    cond do
+      urlData == {"", ""} -> (schedule_next(); {:noreply, state})
+      true -> process_control_flow_cmds(state, urlData)
+    end
   end
 
   defp schedule_next do

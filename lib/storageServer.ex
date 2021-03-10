@@ -23,7 +23,12 @@ defmodule Spider.StorageServer do
     Enum.each(projects, fn project ->
       queued = Spider.QueueAgent.get_currently_queued(project)
 
-      {:ok, _} = Redix.command(redis, ["SET", project <> "queued", Jason.encode!(queued)])
+      queued = cond do
+        not is_tuple(queued) -> {}
+        true -> queued
+      end
+
+      {:ok, _} = Redix.command(redis, ["SET", project <> ":queued", Jason.encode!(Tuple.to_list(queued))])
 
       {:ok, commands} = Redix.command(redis, ["SMEMBERS", project <> ":commands"])
 
@@ -32,21 +37,23 @@ defmodule Spider.StorageServer do
         _ -> Spider.CommandAgent.set_data(project, commands)
       end
 
-      {:ok, sites} = Redix.command(redis, ["SMEMBERS", project <> "sites"])
+      {:ok, sites} = Redix.command(redis, ["SMEMBERS", project <> ":sites"])
 
       case sites do
         nil -> :ok
         _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x }) end)
       end
 
-      {:ok, _} = Redix.command(redis, ["DEL", project <> "sites"])
+      {:ok, _} = Redix.command(redis, ["DEL", project <> ":sites"])
 
-      Enum.each(Spider.OutgoingAgent.get_all_items_in_queue(project), fn x ->
+      Enum.each(Spider.OutgoingAgent.get_all_items_in_queue(project), fn tuple ->
+        { _, x } = tuple
+
         %{ "url" => url, "data" => _ } = x
 
-        {:ok, _} = Redix.command(redis, ["SADD", project <> url, Jason.encode!(x)])
+        {:ok, _} = Redix.command(redis, ["SADD", project <> ":" <> url, Jason.encode!(x)])
 
-        {:ok, _} = Redix.command(redis, ["SADD", project <> "crawled", url])
+        {:ok, _} = Redix.command(redis, ["SADD", project <> ":crawled", url])
       end)
 
       Spider.OutgoingAgent.clear(project)

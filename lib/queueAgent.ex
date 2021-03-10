@@ -31,9 +31,11 @@ defmodule Spider.QueueAgent do
     { project, url } = urlData
     existing = Agent.get(Spider.QueueAgent, fn state -> state end)
     cond do
-      length(Enum.filter(existing, fn oldUrl ->
+      length(Enum.filter(existing, fn oldUrlData ->
+        fixedUrlData = List.to_tuple(Enum.map(Tuple.to_list(urlData), fn item -> String.downcase(item) end))
+        fixedOldUrlData = List.to_tuple(Enum.map(Tuple.to_list(oldUrlData), fn item -> String.downcase(item) end))
         cond do
-          String.trim(String.downcase(url)) == String.trim(String.downcase(oldUrl)) -> true
+          fixedUrlData == fixedOldUrlData -> true
           true -> false
         end
       end)) == 0 -> (IO.puts("Adding URL to queue: " <> url); Agent.update(Spider.QueueAgent, fn state -> state ++ [urlData] end))
