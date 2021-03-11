@@ -8,6 +8,7 @@ defmodule Spider.Supervisor do
   @impl true
   def init(:ok) do
     children = [
+      {Spider.SeenAgent, name: Spider.SeenAgent, strategy: :one_for_one},
       {Spider.QueueAgent, name: Spider.QueueAgent, strategy: :one_for_one},
       {Spider.OutgoingAgent, name: Spider.OutgoingAgent, strategy: :one_for_one},
       {Spider.CommandAgent, name: Spider.CommandAgent, strategy: :one_for_one},

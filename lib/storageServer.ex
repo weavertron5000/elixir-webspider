@@ -23,13 +23,9 @@ defmodule Spider.StorageServer do
     Enum.each(projects, fn project ->
       queued = Spider.QueueAgent.get_currently_queued(project)
 
-      # TODO: this is actually a list of tuples. We need to iterate over each tuple and convert it to a list
-      queued = cond do
-        not is_tuple(queued) -> {}
-        true -> queued
-      end
+      queuedAsLists = Enum.map(queued, &Tuple.to_list(&1))
 
-      {:ok, _} = Redix.command(redis, ["SET", project <> ":queued", Jason.encode!(Tuple.to_list(queued))])
+      {:ok, _} = Redix.command(redis, ["SET", project <> ":queued", Jason.encode!(queuedAsLists)])
 
       {:ok, commands} = Redix.command(redis, ["SMEMBERS", project <> ":commands"])
 
@@ -40,9 +36,11 @@ defmodule Spider.StorageServer do
 
       {:ok, sites} = Redix.command(redis, ["SMEMBERS", project <> ":sites"])
 
+      currentTime = DateTime.now("Etc/UTC") |> elem(1) |> DateTime.to_iso8601()
+
       case sites do
         nil -> :ok
-        _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x }) end)
+        _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x, "0", currentTime }) end)
       end
 
       {:ok, _} = Redix.command(redis, ["DEL", project <> ":sites"])
