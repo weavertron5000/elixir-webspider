@@ -16,8 +16,7 @@ defmodule Spider.QueryServer do
 
   defp add_url(project, url, depth) do
     newDepth = Integer.to_string(String.to_integer(depth) + 1)
-    lastVisit = DateTime.now("Etc/UTC") |> elem(1) |> DateTime.to_iso8601()
-    Spider.QueueAgent.add_url_to_queue({ project, url, newDepth, lastVisit })
+    Spider.QueueAgent.add_url_to_queue({ project, url, newDepth })
   end
 
   defp get_all_commands(project) do
@@ -321,17 +320,12 @@ defmodule Spider.QueryServer do
   end
 
   def process_control_flow_cmds(state, urlData) do
-    { project, url, depth, lastVisitISO } = urlData
-
-    currentTime = DateTime.now("Etc/UTC") |> elem(1)
-    lastVisit = DateTime.from_iso8601(lastVisitISO)
-    shouldProcess = DateTime.diff(currentTime, lastVisit) > 5
+    { project, url, depth } = urlData
 
     commands = get_all_commands(project)
 
     newState = cond do
       Enum.any?(commands, fn x -> x == "halt" end) -> state
-      not shouldProcess -> (Spider.QueueAgent.get_next_in_queue(); add_url(project, url, depth); state) # pop it off the top of the queue and append it to the end when it will more than likely be the right timing
       true -> (Spider.QueueAgent.get_next_in_queue(); tick(state, project, url, depth))
     end
 
@@ -345,12 +339,12 @@ defmodule Spider.QueryServer do
     urlData = Spider.QueueAgent.peek_next_in_queue()
 
     cond do
-      urlData == {"", "", "", ""} -> (schedule_next(); {:noreply, state})
+      urlData == {"", "", ""} -> (schedule_next(); {:noreply, state})
       true -> process_control_flow_cmds(state, urlData)
     end
   end
 
   defp schedule_next do
-    Process.send_after(self(), :tick, 500)
+    Process.send_after(self(), :tick, 3000)
   end
 end

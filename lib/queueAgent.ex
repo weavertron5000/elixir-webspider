@@ -13,7 +13,7 @@ defmodule Spider.QueueAgent do
         length(state) == 1 ->
           ([head] = state; {head, []})
         length(state) == 0 ->
-          {{"","","",""}, []}
+          {{"","",""}, []}
       end
     end)
   end
@@ -22,13 +22,12 @@ defmodule Spider.QueueAgent do
     Agent.get(Spider.QueueAgent, fn state ->
       cond do
         length(state) >= 1 -> hd(state)
-        true -> {"","","",""}
+        true -> {"","",""}
       end
     end)
   end
 
   def add_url_to_queue(urlData) do
-    { _, url, _, _ } = urlData
     existing = Agent.get(Spider.QueueAgent, fn state -> state end)
     cond do
       length(Enum.filter(existing, fn oldUrlData ->
@@ -38,7 +37,7 @@ defmodule Spider.QueueAgent do
           fixedUrlData == fixedOldUrlData -> true
           true -> false
         end
-      end)) == 0 -> (IO.puts("Adding URL to queue: " <> url); Agent.update(Spider.QueueAgent, fn state -> state ++ [urlData] end))
+      end)) == 0 -> Agent.update(Spider.QueueAgent, fn state -> state ++ [urlData] end)
       true -> :ok
     end
   end
@@ -46,7 +45,7 @@ defmodule Spider.QueueAgent do
   def get_currently_queued(project) do
     Agent.get(Spider.QueueAgent, fn state ->
       Enum.filter(state, fn item ->
-        { p, _, _, _ } = item
+        { p, _, _ } = item
         project == p
       end)
     end)

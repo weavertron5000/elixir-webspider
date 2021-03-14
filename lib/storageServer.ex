@@ -36,11 +36,9 @@ defmodule Spider.StorageServer do
 
       {:ok, sites} = Redix.command(redis, ["SMEMBERS", project <> ":sites"])
 
-      currentTime = DateTime.now("Etc/UTC") |> elem(1) |> DateTime.to_iso8601()
-
       case sites do
         nil -> :ok
-        _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x, "0", currentTime }) end)
+        _ -> Enum.each(sites, fn x -> Spider.QueueAgent.add_url_to_queue({ project, x, "0" }) end)
       end
 
       {:ok, _} = Redix.command(redis, ["DEL", project <> ":sites"])
